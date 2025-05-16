@@ -33,7 +33,7 @@ class TimerFSM:
     def get_status(self):
         minutes = self.time_left // 60
         seconds = self.time_left % 60
-        pause_status = "일시정지" if self.is_paused else "진행중"
+        pause_status = "일시정지" if self.is_paused else "진행 중"
         return f"상태: {self.state} ({pause_status}), 남은 시간: {minutes:02d}:{seconds:02d}, 완료 사이클: {self.cycle_count}"
 
 def get_user_time(prompt):
