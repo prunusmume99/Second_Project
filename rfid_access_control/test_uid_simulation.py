@@ -13,4 +13,3 @@ for uid in test_uids:
     pub.send_string(msg)
     print(f"[UID 전송] ✅ UID: {uid}")
     time.sleep(1)
-    
