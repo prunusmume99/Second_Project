@@ -1,8 +1,6 @@
 #include <SPI.h>
 #include <MFRC522.h>
 #include <ESP8266WiFi.h>
-#include <WiFiUdp.h>
-#include <NTPClient.h>
 
 // === WiFi 설정 ===
 const char* ssid = "turtle";
@@ -10,13 +8,10 @@ const char* password = "turtlebot3";
 const char* server_ip = "192.168.0.67";
 const uint16_t server_port = 5001;
 
-WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, "pool.ntp.org", 9 * 3600);  // KST (UTC+9)
-
 WiFiClient client;
 
 // === RFID 핀 설정 (ESP8266 기준) ===
-#define SS_PIN 2    // D8 → RC522의 S DA
+#define SS_PIN 2    // D8 → RC522의 SDA
 #define RST_PIN 15  // D4 → RC522의 RST
 
 MFRC522 mfrc(SS_PIN, RST_PIN);
@@ -28,7 +23,9 @@ String authorizedRFIDs[] = {
 };
 
 void setup() {
-  
+  Serial.begin(115200);
+  delay(1000);
+
   // === WiFi 연결 ===
   WiFi.begin(ssid, password);
   Serial.print("WiFi 연결 중");
@@ -37,12 +34,6 @@ void setup() {
     Serial.print(".");
   }
   Serial.println("\n✅ WiFi 연결됨");
-  
-  timeClient.begin();
-  timeClient.update();  // 시간 한번 불러오기
-
-  Serial.begin(115200);
-  delay(1000);
 
   // === SPI & RFID 초기화 ===
   SPI.begin();
@@ -51,15 +42,6 @@ void setup() {
 }
 
 void loop() {
-
-  // 시간 갱신
-  timeClient.update();
-
-  // 날짜 부분은 NTPClient에서 지원하지 않지만, 포맷을 흉내 낼 수 있어요
-  String timeStr = timeClient.getFormattedTime();  // HH:MM:SS
-  String fakeDate = "2025-05-19";  // 예시 날짜 (또는 고정 값)
-  String timestamp = fakeDate + "T" + timeStr;
-
   if (!mfrc.PICC_IsNewCardPresent()) return;
   if (!mfrc.PICC_ReadCardSerial()) return;
 
@@ -89,14 +71,14 @@ void loop() {
     if (client.connect(server_ip, server_port)) {
       Serial.println("✅ TCP 연결 성공");
 
-      String json = "{";
-      json += "\"desk_id\":\"D12\",";
-      json += "\"event\":\"rfid\",";
-      json += "\"value\":1,";
-      json += "\"uid\":\"" + currentUID + "\",";
-      json += "\"timestamp\":\"" + timestamp + "\"";
-      json += "}";
-
+      // JSON 메시지 예시
+      String json = R"({
+        "desk_id": "D12",
+        "event": "rfid",
+        "value": 1,
+        "uid": ")" + currentUID + R"(",
+        "timestamp": "2025-05-18T01:00:00"
+      })";
 
       client.println(json);  // 개행 포함 전송
       Serial.println("📨 데이터 전송 완료");

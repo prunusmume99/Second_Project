@@ -2,7 +2,7 @@
 
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);     // 내장 LED 핀 설정
-  Serial.begin(9600);               // 시리얼 통신 시작
+  Serial.begin(115200);               // 시리얼 통신 시작
   Serial.println("🟢 ESP8266 시작됨!");
 }
 
