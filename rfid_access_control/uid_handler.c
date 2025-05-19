@@ -11,3 +11,6 @@ int main() {
     printf("[UID 전송] ✅ UID: %s\n", uid);
     return 0;
 }
+
+
+// 
