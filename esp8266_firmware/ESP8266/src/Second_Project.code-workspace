@@ -1,0 +1,12 @@
+{
+	"folders": [
+		{
+			"path": "../../.."
+		},
+		{
+			"name": "ESP8266",
+			"path": "../../../../../Documents/PlatformIO/Projects/ESP8266"
+		}
+	],
+	"settings": {}
+}
