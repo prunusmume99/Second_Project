@@ -1,57 +1,57 @@
-// gcc insert_user.c -o insert_user -lmysqlclien
+// gcc insert_user.c -o insert_user -lmysqlclient
 
-#include <mysql/mysql.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#define HOST "localhost"
-#define USER "bangme"
-#define PASS "djwls123"
-#define DB   "study_db"
+#include <mysql/mysql.h>
 
 int main() {
     MYSQL *conn;
-    char user_id[100];
+    const char *server = "localhost";
+    const char *user = "bangme";
+    const char *password = "djwls123";
+    const char *database = "study_db";
 
-    // 유저 아이디 입력
-    printf("유저 아이디를 입력하세요: ");
-    scanf("%s", user_id);
-
-    // MySQL 연결
     conn = mysql_init(NULL);
-    if (!mysql_real_connect(conn, HOST, USER, PASS, DB, 0, NULL, 0)) {
-        fprintf(stderr, "MySQL 연결 실패: %s\n", mysql_error(conn));
+    if (conn == NULL) {
+        fprintf(stderr, "mysql_init() 실패\n");
         return EXIT_FAILURE;
     }
 
-    // study_record에 초기화
-    char query_record[256];
-    snprintf(query_record, sizeof(query_record),
-             "REPLACE INTO study_record (user_id, study_seconds, break_seconds) "
-             "VALUES ('%s', 0, 0);",
-             user_id);
-
-    if (mysql_query(conn, query_record)) {
-        fprintf(stderr, "study_record 쿼리 실패: %s\n", mysql_error(conn));
+    if (mysql_real_connect(conn, server, user, password, database, 0, NULL, 0) == NULL) {
+        fprintf(stderr, "mysql_real_connect() 실패: %s\n", mysql_error(conn));
         mysql_close(conn);
         return EXIT_FAILURE;
     }
 
-    // study_summary도 초기화
-    char query_summary[256];
-    snprintf(query_summary, sizeof(query_summary),
-             "REPLACE INTO study_summary (user_id, total_study_seconds, study_cycles) "
-             "VALUES ('%s', 0, 0);",
-             user_id);
+    char user_id[20];
+    char name[50];
+    char contact[20];
 
-    if (mysql_query(conn, query_summary)) {
-        fprintf(stderr, "study_summary 쿼리 실패: %s\n", mysql_error(conn));
+    printf("▶ 사용자 ID를 입력하세요 (문자열): ");
+    fgets(user_id, sizeof(user_id), stdin);
+    user_id[strcspn(user_id, "\n")] = '\0';
+
+    printf("▶ 이름을 입력하세요: ");
+    fgets(name, sizeof(name), stdin);
+    name[strcspn(name, "\n")] = '\0';
+
+    printf("▶ 연락처를 입력하세요: ");
+    fgets(contact, sizeof(contact), stdin);
+    contact[strcspn(contact, "\n")] = '\0';
+
+    char query[256];
+    snprintf(query, sizeof(query),
+             "INSERT INTO users (user_id, name, contact) VALUES ('%s', '%s', '%s')",
+             user_id, name, contact);
+
+    if (mysql_query(conn, query)) {
+        fprintf(stderr, "❌ 사용자 INSERT 실패: %s\n", mysql_error(conn));
         mysql_close(conn);
         return EXIT_FAILURE;
     }
 
-    printf("'%s' 유저가 study_record 및 study_summary에 초기화 등록되었습니다.\n", user_id);
+    printf("✅ 사용자 등록 완료!\n");
 
     mysql_close(conn);
     return EXIT_SUCCESS;
