@@ -107,8 +107,8 @@
 //         Serial.println("✅ TCP 연결 성공");
 
 //         String json = "{";
-//         json += "\"event\":\"fsr\",";
 //         json += "\"value\":" + String(fsrValue) + ",";
+//         json += "\"event\":\"fsr\",";
 //         json += "\"timestamp\":\"" + String(timestamp) + "\"";
 //         json += "}";
 
