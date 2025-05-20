@@ -1,0 +1,6 @@
+2025-05-20 09:00:00 | Routine: morning_routine | State: STARTED
+2025-05-20 09:05:00 | Routine: morning_routine | State: IN_PROGRESS
+2025-05-20 09:10:00 | Routine: morning_routine | State: COMPLETED
+2025-05-20 18:00:00 | Routine: evening_routine | State: STARTED
+2025-05-20 18:10:00 | Routine: evening_routine | State: IN_PROGRESS
+2025-05-20 18:20:00 | Routine: evening_routine | State: COMPLETED
