@@ -1,19 +1,22 @@
-#include <SPI.h>
-#include <MFRC522.h>
-#include <ESP8266WiFi.h>
-#include <WiFiUdp.h>
-#include <NTPClient.h>
-#include <time.h>
+#include <SPI.h>          // RFID 리더기와 통신을 위한 Arduino 공식 SPI 라이브러리
+#include <MFRC522.h>      // MFRC522 RFID 모듈용 라이브러리
+#include <ESP8266WiFi.h>  // ESP8266 WiFi 기능을 위한 라이브러리
+#include <WiFiUdp.h>      // UDP 통신을 위한 라이브러리 (NTP 용도)
+#include <NTPClient.h>    // 인터넷 시간(NTP 서버) 클라이언트
+#include <time.h>         // 시간 관련 함수 사용을 위한 라이브러리
 
 // === WiFi 설정 ===
 const char* ssid = "turtle";
 const char* password = "turtlebot3";
-const char* server_ip = "192.168.0.67";
-const uint16_t server_port = 5001;
+const char* server_ip = "192.168.0.67"; // TCP 서버 IP 주소
+const uint16_t server_port = 5001;      // TCP 서버 포트 번호
 
+// === NTP 설정 ===
+// NTPClient 라이브러리 사용을 위한 UDP 객체 생성
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", 9 * 3600);  // KST (UTC+9)
 
+// === TCP 클라이언트 설정 ===
 WiFiClient client;
 
 // === RFID 핀 설정 (ESP8266 기준) ===
@@ -57,8 +60,8 @@ void setup() {
   Serial.println("\n✅ 시간 동기화 완료");
 
   // === SPI & RFID 초기화 ===
-  SPI.begin();
-  mfrc.PCD_Init();
+  SPI.begin(); // SPI 통신 선로 준비 (SPI.h)
+  mfrc.PCD_Init(); // MFR522 레지스터, 설정 등 내부 초기화 (MFRC522.h)
   Serial.println("📡 RFID 리더기 준비 완료. 카드를 태그해주세요.");
 }
 
