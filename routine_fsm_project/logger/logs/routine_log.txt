@@ -1,0 +1,3 @@
+2025-05-20 09:26:29 | Routine: morning_routine | State: STARTED | Message: Routine 시작
+2025-05-20 09:26:29 | Routine: morning_routine | State: IN_PROGRESS | Message: 사용자 운동 중
+2025-05-20 09:26:29 | Routine: morning_routine | State: COMPLETED | Message: 루틴 완료
