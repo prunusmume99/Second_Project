@@ -11,7 +11,7 @@ def create_sub_socket(connect_to: str, topic_filter: bytes = b""):
     socket.setsockopt(zmq.SUBSCRIBE, topic_filter)
     return socket
 
-ESP8266_IP = '192.168.0.99'  # 실제 ESP8266 장치의 IP 주소
+ESP8266_IP = '192.168.0.103'  # 실제 ESP8266 장치의 IP 주소
 ESP8266_PORT = 6002          # ESP8266이 수신 대기 중인 포트
 
 def send_to_esp8266(json_data):
