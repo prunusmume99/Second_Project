@@ -1,54 +1,67 @@
-#include <mysql/mysql.h>
+// insert_routine_log.c
+// 컴파일: gcc insert_routine_log.c -o insert_routine_log -lmysqlclient
+
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <mysql/mysql.h>
 
 #define HOST "localhost"
 #define USER "root"
 #define PASS "Dmsrb7867!"
 #define DB   "study_db"
 
-int main() {
-    MYSQL *conn;
-    char user_id[51];
-    int total_study_time;
-    int pause_count;
-    char status[10];  // 'COMPLETE', 'PAUSED', 'FORCE_EXIT'
-
-    // 입력 받기
-    printf("User ID를 입력하세요 (최대 50자): ");
-    scanf("%50s", user_id);
-
-    printf("총 공부 시간(초)을 입력하세요: ");
-    scanf("%d", &total_study_time);
-
-    printf("일시정지 횟수를 입력하세요: ");
-    scanf("%d", &pause_count);
-
-    printf("상태를 입력하세요 (COMPLETE, PAUSED, FORCE_EXIT): ");
-    scanf("%9s", status);
-
-    // MySQL 연결 초기화
-    conn = mysql_init(NULL);
-    if (!mysql_real_connect(conn, HOST, USER, PASS, DB, 0, NULL, 0)) {
-        fprintf(stderr, "MySQL 연결 실패: %s\n", mysql_error(conn));
-        return EXIT_FAILURE;
-    }
-
-    // 쿼리문 작성
+int insert_routine_log(MYSQL *conn, const char *user_id, int total_study_time, int pause_count, const char *status) {
     char query[512];
     snprintf(query, sizeof(query),
         "INSERT INTO routine_log (user_id, total_study_time, pause_count, status) "
-        "VALUES ('%s', %d, %d, '%s');",
+        "VALUES ('%s', %d, %d, '%s')",
         user_id, total_study_time, pause_count, status);
 
-    // 쿼리 실행
     if (mysql_query(conn, query)) {
-        fprintf(stderr, "쿼리 실패: %s\n", mysql_error(conn));
+        fprintf(stderr, "❌ INSERT 실패: %s\n", mysql_error(conn));
+        return 0;
+    }
+    printf("✅ routine_log 삽입 성공: user_id=%s, total_study_time=%d, pause_count=%d, status=%s\n",
+           user_id, total_study_time, pause_count, status);
+    return 1;
+}
+
+int main() {
+    MYSQL *conn = mysql_init(NULL);
+    if (conn == NULL) {
+        fprintf(stderr, "mysql_init() 실패\n");
+        return EXIT_FAILURE;
+    }
+
+    if (mysql_real_connect(conn, HOST, USER, PASS, DB, 0, NULL, 0) == NULL) {
+        fprintf(stderr, "mysql_real_connect() 실패: %s\n", mysql_error(conn));
         mysql_close(conn);
         return EXIT_FAILURE;
     }
 
-    printf("routine_log에 데이터가 성공적으로 삽입되었습니다.\n");
+    char user_id[50];
+    int total_study_time;
+    int pause_count;
+    char status[20];
+
+    printf("▶ 사용자 ID 입력: ");
+    fgets(user_id, sizeof(user_id), stdin);
+    user_id[strcspn(user_id, "\n")] = 0;
+
+    printf("▶ 총 공부 시간(분) 입력: ");
+    scanf("%d", &total_study_time);
+    getchar(); // 개행 제거
+
+    printf("▶ 일시 정지 횟수 입력: ");
+    scanf("%d", &pause_count);
+    getchar();
+
+    printf("▶ 상태 입력 (COMPLETE, PAUSED, FORCE_EXIT): ");
+    fgets(status, sizeof(status), stdin);
+    status[strcspn(status, "\n")] = 0;
+
+    insert_routine_log(conn, user_id, total_study_time, pause_count, status);
 
     mysql_close(conn);
     return EXIT_SUCCESS;
