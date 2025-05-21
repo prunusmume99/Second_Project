@@ -32,6 +32,7 @@ def main():
             message = sub_socket.recv_json()
             print(f"[Bridge SUB→TCP] 받은 메시지: {message}")
             send_to_esp8266(message)
+            time.sleep(0.5)
         except Exception as e:
             print(f"⚠️ 에러 발생: {e}")
             time.sleep(1)

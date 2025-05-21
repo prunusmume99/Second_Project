@@ -73,7 +73,22 @@ void loop()
     if (client)
     {
         Serial.println("📥 클라이언트 연결됨");
-        String message = client.readStringUntil('\n');
+
+        unsigned long startTime = millis();
+        while (!client.available()) {
+            if (millis() - startTime > 1000) { // 1초 대기 후 타임아웃
+                Serial.println("⚠️ 데이터 수신 대기 시간 초과");
+                client.stop();
+                return;
+            }
+            delay(10); // 잠깐 대기
+        }
+
+        // 데이터가 도착했으므로 읽기 시작
+        char buffer[128];
+        int len = client.readBytesUntil('\n', buffer, sizeof(buffer) - 1);
+        buffer[len] = '\0'; // null-terminate
+        String message = String(buffer);
         Serial.println("수신 메시지: " + message);
 
         lcd.clear();
@@ -88,15 +103,15 @@ void loop()
         lcd.print(message);
 
         client.stop();
+        delay(500); // LCD에 읽을 시간 확보
     }
     else
     {
         Serial.println("❌ TCP 연결 실패");
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("TCP Fail...");
+        // lcd.clear();
+        // lcd.setCursor(0, 0);
+        // lcd.print("TCP Fail...");
+        delay(10);
     }
-
-    delay(100); // 0.1초마다 재시도
 
 }
