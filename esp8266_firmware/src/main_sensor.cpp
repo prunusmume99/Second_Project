@@ -26,13 +26,8 @@ const char *DESK_ID = "DESK01"; // 고유한 클라이언트 ID (예: DESK01, DE
 // === TCP 클라이언트 설정 ===
 AsyncClient client;
 const char *remoteHost = "192.168.0.60"; // 라즈베리 파이 서버 IP
-const int remotePort = 8080;             // 라즈베리 파이 서버 포트
-unsigned long lastClientSend = 0;
+const int remotePort = 5005;             // 라즈베리 파이 서버 포트
 String pendingMessage = ""; // 연결 후 보낼 메시지
-
-// === ping 설정 ===
-unsigned long lastPingTime = 0;
-const unsigned long PING_INTERVAL = 1000; // 1초 간격
 
 // === 함수 선언 ===
 void handleClientConnect(void *arg, AsyncClient *c);
@@ -85,76 +80,52 @@ void loop()
 {
     if (!auth_flag)
     {
-        // 새로운 카드가 있는지 확인
-        if (!rfid.PICC_IsNewCardPresent()) return;
-        // 카드가 읽기 가능한지 확인
-        if (!rfid.PICC_ReadCardSerial()) return;
-
-        // UID를 문자열로 변환
-        String currentUID = "";
-        for (byte i = 0; i < rfid.uid.size; i++)
+        if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial())
         {
-            currentUID += String(rfid.uid.uidByte[i]);
-            if (i < rfid.uid.size - 1)
-                currentUID += " ";
+            // UID를 문자열로 변환
+            String currentUID = "";
+            for (byte i = 0; i < rfid.uid.size; i++)
+            {
+                currentUID += String(rfid.uid.uidByte[i]);
+                if (i < rfid.uid.size - 1)
+                    currentUID += " ";
+            }
+            String tagTime = getCurrentTimestamp();
+
+            Serial.print("your RFID : ");
+            Serial.println(currentUID);
+            Serial.print("your DESK : ");
+            Serial.println(DESK_ID);
+            Serial.print("touch time : ");
+            Serial.println(tagTime);
+
+            if (client.connected())
+            {
+                String message = "{";
+                message += "\"event\":\"rfid\",";
+                message += "\"did\":\"" + String(DESK_ID) + "\",";
+                message += "\"uid\":\"" + currentUID + "\",";
+                message += "\"timestamp\":\"" + tagTime + "\"";
+                message += "}";
+                sendMessageAfterConnect(message);
+                // client.write(message.c_str());
+                // Serial.println("Sent to server: " + message);
+            }
+            else
+            {
+                Serial.println("Tcp unconnected!!");
+                client.connect(remoteHost, remotePort);
+            }
+
+            // 카드 통신 종료
+            rfid.PICC_HaltA();
+            rfid.PCD_StopCrypto1();
+
+            delay(1000); // 중복 인식 방지
         }
-        String tagTime = getCurrentTimestamp();
-
-        Serial.print("your RFID : ");
-        Serial.println(currentUID);
-        Serial.print("your DESK : ");
-        Serial.println(DESK_ID);
-        Serial.print("touch time : ");
-        Serial.println(tagTime);
-
-        if (client.connected())
-        {
-            String message = "{";
-            message += "\"event\":\"rfid\",";
-            message += "\"did\":\"" + String(DESK_ID) + "\",";
-            message += "\"uid\":\"" + currentUID + "\",";
-            message += "\"timestamp\":\"" + tagTime + "\"";
-            message += "}";
-            sendMessageAfterConnect(message);
-            // client.write(message.c_str());
-            // Serial.println("Sent to server: " + message);
-        }
-        else
-        {
-            Serial.println("Tcp unconnected!!");
-            client.connect(remoteHost, remotePort);
-        }
-
-        // 카드 통신 종료
-        rfid.PICC_HaltA();
-        rfid.PCD_StopCrypto1();
-
-        delay(1000); // 중복 인식 방지
     }
     else
     {
-    }
-
-    // === ping 처리 ===
-    if (millis() - lastPingTime > PING_INTERVAL)
-    {
-        lastPingTime = millis();
-
-        if (client.connected())
-        {
-            String pingMsg = "{";
-            pingMsg += "\"event\":\"ping\",";
-            pingMsg += "\"did\":\"" + String(DESK_ID) + "\",";
-            pingMsg += "\"timestamp\":\"" + getCurrentTimestamp() + "\"";
-            pingMsg += "}";
-            client.write((pingMsg + "\n").c_str());
-            Serial.println("Ping sent: " + pingMsg);
-        }
-        else
-        {
-            Serial.println("Ping 실패: TCP 연결 안됨");
-            client.connect(remoteHost, remotePort); // 재연결 시도
-        }
     }
 }
 
