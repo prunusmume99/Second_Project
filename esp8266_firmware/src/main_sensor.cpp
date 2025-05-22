@@ -3,8 +3,6 @@
 #include <MFRC522.h>     // MFRC522 RFID 모듈용 라이브러리
 #include <ESP8266WiFi.h> // ESP8266 WiFi 기능을 위한 라이브러리
 #include <ESPAsyncTCP.h> // ESP8266 전용 비동기 TCP 통신 라이브러리
-#include <WiFiUdp.h>     // UDP 통신을 위한 라이브러리 (NTP 용도)
-#include <NTPClient.h>   // 인터넷 시간(NTP 서버) 클라이언트
 #include <time.h>        // 시간 관련 함수 사용을 위한 라이브러리
 
 #define FSR_PIN A0 // NodeMCU의 아날로그 핀
@@ -20,13 +18,6 @@
 
 MFRC522 rfid(SS_PIN, RST_PIN);
 
-// 등록된 RFID UID 목록
-// String authorizedRFIDs[] = {
-//     "45 13 217 5",
-//     "146 57 157 4",
-//     "147 148 214 5"
-// };
-
 // === WiFi 설정 ===
 const char *ssid = "turtle";
 const char *password = "turtlebot3";
@@ -38,15 +29,11 @@ const char *remoteHost = "192.168.0.60"; // 라즈베리 파이 서버 IP
 const int remotePort = 8080;             // 라즈베리 파이 서버 포트
 unsigned long lastClientSend = 0;
 
-// === NTP 설정 ===
-// NTPClient 라이브러리 사용을 위한 UDP 객체 생성
-WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, "pool.ntp.org", 9 * 3600); // KST (UTC+9)
-
 // === 함수 선언 ===
 void handleClientConnect(void *arg, AsyncClient *c);
 void handleClientData(void *arg, AsyncClient *c, void *data, size_t len);
 void handleClientDisconnect(void *arg, AsyncClient *c);
+void waitForTimeSync();
 String getCurrentTimestamp();
 
 // === Sensor Flag 초기화 ===
@@ -58,6 +45,12 @@ void setup()
 {
     Serial.begin(115200);
     delay(500);
+    
+    // === SPI & RFID 초기화 ===
+    SPI.begin();     // SPI 통신 선로 준비 (SPI.h)
+    rfid.PCD_Init(); // MFR522 레지스터, 설정 등 내부 초기화 (MFRC522.h)
+    
+    pinMode(TOUCH_PIN, INPUT);
 
     // === WiFi 연결 ===
     WiFi.begin(ssid, password);
@@ -71,35 +64,26 @@ void setup()
     Serial.print("  IP: ");
     Serial.println(WiFi.localIP());
 
+    // NTP 설정 (KST 기준)
+    configTime(9 * 3600, 0, "pool.ntp.org", "time.nist.gov");
+    waitForTimeSync();
+
     // TCP 클라이언트 설정
     client.onConnect(&handleClientConnect, nullptr);
     client.onData(&handleClientData, nullptr);
     client.onDisconnect(&handleClientDisconnect, nullptr);
     client.connect(remoteHost, remotePort);
-
-    timeClient.begin();
-    timeClient.update(); // 시간 한번 불러오기
-
-    // NTP 서버 설정 (KST = UTC + 9시간)
-    configTime(9 * 3600, 0, "pool.ntp.org", "time.nist.gov");
-    Serial.println("시간 동기화 중...");
-
-    // 시간 동기화 대기
-    while (time(nullptr) < 100000)
-    {
-        delay(500);
-        Serial.print(".");
-    }
-    Serial.println("시간 동기화 완료");
-
-    // pinMode(TOUCH_PIN, INPUT);
 }
 
 void loop()
 {
-    if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial())
-    // 새로운 카드가 있는지 확인 && 카드가 읽기 가능한지 확인
+    if (!auth_flag)
     {
+        // 새로운 카드가 있는지 확인
+        if (!rfid.PICC_IsNewCardPresent()) return;
+        // 카드가 읽기 가능한지 확인
+        if (!rfid.PICC_ReadCardSerial()) return;
+
         // UID를 문자열로 변환
         String currentUID = "";
         for (byte i = 0; i < rfid.uid.size; i++)
@@ -121,8 +105,8 @@ void loop()
         {
             String message = "{";
             message += "\"event\":\"rfid\",";
-            message += "\"did\":" + String(DESK_ID) + ",";
-            message += "\"uid\":" + currentUID + ",";
+            message += "\"did\":\"" + String(DESK_ID) + "\",";
+            message += "\"uid\":\"" + currentUID + "\",";
             message += "\"timestamp\":\"" + tagTime + "\"";
             message += "}";
             client.write(message.c_str());
@@ -160,44 +144,9 @@ void handleClientDisconnect(void *arg, AsyncClient *c)
     client.connect(remoteHost, remotePort);
 }
 
-// ISO 8601 시간 문자열을 반환하는 함수
-String getCurrentTimestamp()
-{
-    timeClient.update(); // NTP 시간 갱신
-
-    time_t now = time(nullptr);            // 현재 시간 (Epoch time)
-    struct tm *timeinfo = localtime(&now); // 현지 시간 구조체로 변환
-
-    char timestamp[25];
-    strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%S", timeinfo);
-
-    return String(timestamp); // String 타입으로 반환
-}
-
-#include <SPI.h>
-#include <MFRC522.h>
-#include <ESP8266WiFi.h>
-#include <ESPAsyncTCP.h>
-#include <time.h>
-
-const char *ssid = "turtle";
-const char *password = "turtlebot3";
-const char *CLIENT_ID = "Desk-01";
-
-const char *remoteHost = "192.168.0.60";
-const int remotePort = 8080;
-
-#define SS_PIN 2
-#define RST_PIN 5
-MFRC522 mfrc(SS_PIN, RST_PIN);
-
-AsyncClient client;
-String lastUID = "";
-unsigned long lastSendTime = 0;
-
 void waitForTimeSync()
 {
-    Serial.println("⏳ NTP 시간 동기화 대기 중...");
+    Serial.println("NTP 시간 동기화 대기 중...");
     time_t now = time(nullptr);
     int attempts = 0;
     while (now < 1000000000 && attempts++ < 20)
@@ -208,117 +157,33 @@ void waitForTimeSync()
     }
     if (now >= 1000000000)
     {
-        Serial.println("\n✅ NTP 시간 동기화 완료!");
+        Serial.println("\nNTP 시간 동기화 완료!");
     }
     else
     {
-        Serial.println("\n❌ 시간 동기화 실패 (인터넷 또는 DNS 확인)");
+        Serial.println("\n시간 동기화 실패 (인터넷 또는 DNS 확인)");
     }
 }
 
-void handleClientConnect(void *arg, AsyncClient *c)
+// ISO 8601 시간 문자열을 반환하는 함수
+String getCurrentTimestamp()
 {
-    Serial.println("✅ TCP 서버에 연결됨");
-}
-void handleClientData(void *arg, AsyncClient *c, void *data, size_t len)
-{
-    Serial.printf("📩 서버 응답: %.*s\n", len, (char *)data);
-}
-void handleClientDisconnect(void *arg, AsyncClient *c)
-{
-    Serial.println("❌ TCP 연결 끊김 → 재연결 시도");
-    client.connect(remoteHost, remotePort);
-}
-
-void setup()
-{
-    Serial.begin(115200);
-    WiFi.begin(ssid, password);
-    while (WiFi.status() != WL_CONNECTED)
+    time_t now = time(nullptr); // 현재 시간 (Epoch time)
+    if (now < 1000000000)
     {
-        delay(500);
-        Serial.print(".");
+        Serial.println("❌ 아직 시간 동기화 안 됨 → 전송 취소");
+        return String("1970-01-01일 00:00:00");
     }
-    Serial.println("\n✅ Wi-Fi 연결 완료");
 
-    // ✅ NTP 설정 (KST 기준)
-    configTime(9 * 3600, 0, "pool.ntp.org");
-    waitForTimeSync();
-
-    // ✅ RFID 초기화
-    SPI.begin();
-    mfrc.PCD_Init();
-
-    // ✅ TCP 연결 설정
-    client.onConnect(&handleClientConnect, nullptr);
-    client.onData(&handleClientData, nullptr);
-    client.onDisconnect(&handleClientDisconnect, nullptr);
-    client.connect(remoteHost, remotePort);
-}
-
-void loop()
-{
-    if (mfrc.PICC_IsNewCardPresent() && mfrc.PICC_ReadCardSerial())
+    struct tm *timeinfo = localtime(&now); // 현지 시간 구조체로 변환
+    if (!timeinfo)
     {
-        String currentUID = "";
-        for (byte i = 0; i < mfrc.uid.size; i++)
-        {
-            currentUID += String(mfrc.uid.uidByte[i]);
-            if (i < mfrc.uid.size - 1)
-                currentUID += " ";
-        }
-
-        if (currentUID == lastUID && millis() - lastSendTime < 3000)
-            return;
-
-        lastUID = currentUID;
-        lastSendTime = millis();
-
-        time_t now = time(nullptr);
-        if (now < 1000000000)
-        {
-            Serial.println("❌ 아직 시간 동기화 안 됨 → 전송 취소");
-            return;
-        }
-
-        struct tm *ptm = localtime(&now);
-        if (!ptm)
-        {
-            Serial.println("❌ localtime() 실패 → 전송 취소");
-            return;
-        }
-
-        char timestamp[30];
-        snprintf(timestamp, sizeof(timestamp), "%04d-%02d-%02dT%02d:%02d:%02d",
-                 ptm->tm_year + 1900,
-                 ptm->tm_mon + 1,
-                 ptm->tm_mday,
-                 ptm->tm_hour,
-                 ptm->tm_min,
-                 ptm->tm_sec);
-
-        String json = "{";
-        json += "\"event\":\"rfid_scan\",";
-        json += "\"did\":\"" + String(CLIENT_ID) + "\",";
-        json += "\"uid\":\"" + currentUID + "\",";
-        json += "\"timestamp\":\"" + String(timestamp) + "\"";
-        json += "}";
-
-        Serial.println("📨 전송 메시지:");
-        Serial.println(json);
-
-        if (client.connected())
-        {
-            client.write(json.c_str());
-        }
-        else
-        {
-            Serial.println("❌ 서버 연결 안 됨 → 재연결");
-            client.connect(remoteHost, remotePort);
-        }
-
-        mfrc.PICC_HaltA();
-        mfrc.PCD_StopCrypto1();
-        delay(1000);
+        Serial.println("❌ localtime() 실패 → 전송 취소");
+        return String("1970-01-01일 00:00:00");
     }
+
+    char timestamp[25];
+    strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", timeinfo);
+
+    return String(timestamp); // String 타입으로 반환
 }
