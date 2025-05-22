@@ -28,11 +28,17 @@ AsyncClient client;
 const char *remoteHost = "192.168.0.60"; // 라즈베리 파이 서버 IP
 const int remotePort = 8080;             // 라즈베리 파이 서버 포트
 unsigned long lastClientSend = 0;
+String pendingMessage = ""; // 연결 후 보낼 메시지
+
+// === ping 설정 ===
+unsigned long lastPingTime = 0;
+const unsigned long PING_INTERVAL = 1000; // 1초 간격
 
 // === 함수 선언 ===
 void handleClientConnect(void *arg, AsyncClient *c);
 void handleClientData(void *arg, AsyncClient *c, void *data, size_t len);
 void handleClientDisconnect(void *arg, AsyncClient *c);
+void sendMessageAfterConnect(String msg);
 void waitForTimeSync();
 String getCurrentTimestamp();
 
@@ -63,16 +69,16 @@ void setup()
     Serial.print("\nWiFi 연결됨");
     Serial.print("  IP: ");
     Serial.println(WiFi.localIP());
-
-    // NTP 설정 (KST 기준)
-    configTime(9 * 3600, 0, "pool.ntp.org", "time.nist.gov");
-    waitForTimeSync();
-
+    
     // TCP 클라이언트 설정
     client.onConnect(&handleClientConnect, nullptr);
     client.onData(&handleClientData, nullptr);
     client.onDisconnect(&handleClientDisconnect, nullptr);
     client.connect(remoteHost, remotePort);
+
+    // NTP 설정 (KST 기준)
+    configTime(9 * 3600, 0, "pool.ntp.org", "time.nist.gov");
+    waitForTimeSync();
 }
 
 void loop()
@@ -109,8 +115,14 @@ void loop()
             message += "\"uid\":\"" + currentUID + "\",";
             message += "\"timestamp\":\"" + tagTime + "\"";
             message += "}";
-            client.write(message.c_str());
-            Serial.println("Sent to server: " + message);
+            sendMessageAfterConnect(message);
+            // client.write(message.c_str());
+            // Serial.println("Sent to server: " + message);
+        }
+        else
+        {
+            Serial.println("Tcp unconnected!!");
+            client.connect(remoteHost, remotePort);
         }
 
         // 카드 통신 종료
@@ -122,12 +134,39 @@ void loop()
     else
     {
     }
+
+    // === ping 처리 ===
+    if (millis() - lastPingTime > PING_INTERVAL)
+    {
+        lastPingTime = millis();
+
+        if (client.connected())
+        {
+            String pingMsg = "{";
+            pingMsg += "\"event\":\"ping\",";
+            pingMsg += "\"did\":\"" + String(DESK_ID) + "\",";
+            pingMsg += "\"timestamp\":\"" + getCurrentTimestamp() + "\"";
+            pingMsg += "}";
+            client.write((pingMsg + "\n").c_str());
+            Serial.println("Ping sent: " + pingMsg);
+        }
+        else
+        {
+            Serial.println("Ping 실패: TCP 연결 안됨");
+            client.connect(remoteHost, remotePort); // 재연결 시도
+        }
+    }
 }
 
 // 클라이언트 연결 콜백
 void handleClientConnect(void *arg, AsyncClient *c)
 {
     Serial.println("Connected to server");
+    if (pendingMessage.length() > 0) {
+        client.write((pendingMessage + "\n").c_str());
+        Serial.println("Sent after connect: " + pendingMessage);
+        pendingMessage = ""; // 전송 완료 후 초기화
+    }
 }
 
 // 클라이언트 데이터 수신 콜백
@@ -140,8 +179,17 @@ void handleClientData(void *arg, AsyncClient *c, void *data, size_t len)
 void handleClientDisconnect(void *arg, AsyncClient *c)
 {
     Serial.println("Disconnected from server");
-    // 재연결 시도
     client.connect(remoteHost, remotePort);
+}
+
+void sendMessageAfterConnect(String msg) {
+    if (client.connected()) {
+        client.write((msg + "\n").c_str());
+        Serial.println("Sent immediately: " + msg);
+    } else {
+        pendingMessage = msg; // 나중에 전송할 메시지 저장
+        client.connect(remoteHost, remotePort); // 연결 시도
+    }
 }
 
 void waitForTimeSync()
@@ -171,14 +219,14 @@ String getCurrentTimestamp()
     time_t now = time(nullptr); // 현재 시간 (Epoch time)
     if (now < 1000000000)
     {
-        Serial.println("❌ 아직 시간 동기화 안 됨 → 전송 취소");
+        Serial.println("아직 시간 동기화 안 됨 → 전송 취소");
         return String("1970-01-01일 00:00:00");
     }
 
     struct tm *timeinfo = localtime(&now); // 현지 시간 구조체로 변환
     if (!timeinfo)
     {
-        Serial.println("❌ localtime() 실패 → 전송 취소");
+        Serial.println("localtime() 실패 → 전송 취소");
         return String("1970-01-01일 00:00:00");
     }
 
