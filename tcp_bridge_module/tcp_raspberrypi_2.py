@@ -2,11 +2,14 @@
 # python3 -m venv myenv
 # source myenv/bin/activate
 # pip install pyzmq
+# pip install pymysql
 
 import socket
 import selectors
 import zmq
 import datetime
+import json
+import pymysql  # 또는 원하는 DB
 
 # 서버 설정>
 HOST = '0.0.0.0'  # 모든 인터페이스에서 수신
@@ -43,6 +46,27 @@ def accept_connection(server_socket):
     sel.register(client_socket, selectors.EVENT_READ, handle_client)
     print(f"{datetime.datetime.now()}: New connection from {addr}")
 
+def check_auth(did, uid):
+    # 데이터베이스에서 did, uid 일치 여부 확인
+    try:
+        conn = pymysql.connect(
+            host = "localhost",
+            user = "root",
+            password = "djwls123",
+            database = "study_db"
+        )
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT COUNT(*) FROM User_Table WHERE Desk_Num=%s AND Card_Num=%s",
+            (did, uid)
+        )
+        count = cur.fetchone()[0]
+        conn.close()
+        return count > 0
+    except Exception as e:
+        print(f"DB Error: {e}")
+        return False
+
 def handle_client(client_socket):
     addr = clients[client_socket]['addr']
     try:
@@ -51,28 +75,43 @@ def handle_client(client_socket):
             clients[client_socket]['buffer'] += data
             # 줄바꿈(\n)으로 메시지 완성 여부 확인
             while b'\n' in clients[client_socket]['buffer']:
-                message, _, clients[client_socket]['buffer'] = clients[client_socket]['buffer'].partition(b'\n')
-                message = message.decode().strip()
-                if message:
-                    # 클라이언트 ID 추출
-                    if ':' in message:
-                        client_id, payload = message.split(':', 1)
-                        client_id = client_id.strip()
-                        if clients[client_socket]['id'] == 'Unknown':
-                            clients[client_socket]['id'] = client_id
-                            print(f"{datetime.datetime.now()}: Client {addr} identified as {client_id}")
-                    else:
-                        client_id = clients[client_socket]['id']
-                        payload = message
-                    
-                    print(f"{datetime.datetime.now()}: Received from {client_id} ({addr}): {message}")
-                    
-                    # ZeroMQ로 데이터 전송
-                    zmq_socket.send_string(f"{client_id}: {payload}")
-                    
-                    # 클라이언트에 에코 응답
-                    response = f"Echo from server: {message}\n"
-                    client_socket.send(response.encode())
+                line, _, clients[client_socket]['buffer'] = clients[client_socket]['buffer'].partition(b'\n')
+                try:
+                    parsed = json.loads(line.decode().strip())
+                    event = parsed.get("event")
+                    did = parsed.get("did")
+                    uid = parsed.get("uid")
+                    value = parsed.get("value")
+                    timestamp = parsed.get("timestamp")
+
+                    # 최초 id 저장
+                    if clients[client_socket].get('id', 'Unknown') == 'Unknown' and did:
+                        clients[client_socket]['id'] = did
+                        print(f"🎯 Client {addr} identified as {did}")
+
+                    print(f"{datetime.datetime.now()}: Received {event} from {did} - UID: {uid}, JSON: {line.decode()}")
+
+                    if event == "ping":
+                        pass
+
+                    elif event == "rfid" and did and uid:
+                        is_auth = check_auth(did, uid)
+                        response_event = "Auth" if is_auth else "Block"
+
+                        # resp = {
+                        #     "event": response_event,
+                        #     "did": did,
+                        #     "uid": uid,
+                        #     "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        # }
+                        client_socket.send((response_event + "\n").encode())
+                        print(f" → Sent to {did}: {response_event}")
+
+                    # 모든 이벤트에 대해 ZMQ로 중계
+                    zmq_socket.send_string(f"{did}: {json.dumps(parsed)}")
+
+                except json.JSONDecodeError as e:
+                    print(f"❌ JSON Parse Error: {e}, Raw: {line}")
         else:
             # 클라이언트 연결 종료
             close_client(client_socket)
