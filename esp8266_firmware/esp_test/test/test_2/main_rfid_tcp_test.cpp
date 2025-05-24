@@ -11,8 +11,8 @@ const uint16_t server_port = 5001;
 WiFiClient client;
 
 // === RFID 핀 설정 (ESP8266 기준) ===
-#define SS_PIN 2    // D8 → RC522의 SDA
-#define RST_PIN 15  // D4 → RC522의 RST
+#define SS_PIN 2  
+#define RST_PIN 5  
 
 MFRC522 mfrc(SS_PIN, RST_PIN);
 

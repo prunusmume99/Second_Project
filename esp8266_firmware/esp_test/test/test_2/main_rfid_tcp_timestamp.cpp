@@ -20,15 +20,18 @@ NTPClient timeClient(ntpUDP, "pool.ntp.org", 9 * 3600);  // KST (UTC+9)
 WiFiClient client;
 
 // === RFID 핀 설정 (ESP8266 기준) ===
-#define SS_PIN 2    // D8 → RC522의 S DA
-#define RST_PIN 15  // D4 → RC522의 RST
+#define SS_PIN 2  
+#define RST_PIN 5 
 
 MFRC522 mfrc(SS_PIN, RST_PIN);
 
 // 등록된 RFID UID 목록
 String authorizedRFIDs[] = {
   "180 175 140 4",   // 윤진
-  "48 207 16 168"    // 예비 카드
+  "48 207 16 168",
+  "69 39 144 4",
+  "9 85 162 4",
+  "85 163 163 4"
 };
 
 void setup() {
