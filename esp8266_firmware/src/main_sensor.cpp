@@ -1,4 +1,6 @@
 #include <Arduino.h>
+#include <ArduinoJson.h>
+// git clone https://github.com/bblanchon/ArduinoJson
 #include <ESP8266WiFi.h> // ESP8266 WiFi 기능을 위한 라이브러리
 #include <ESPAsyncTCP.h> // ESP8266 전용 비동기 TCP 통신 라이브러리
 // git clone https://github.com/me-no-dev/ESPAsyncTCP.git
@@ -32,11 +34,36 @@ unsigned long lastClientSend = 0;
 void handleClientConnect(void *arg, AsyncClient *c);
 void handleClientData(void *arg, AsyncClient *c, void *data, size_t len);
 void handleClientDisconnect(void *arg, AsyncClient *c);
+String getCurrentTime();
+void sendToTcpServer(String event, String value = String(0));
 
 // === Sensor Flag 초기화 ===
 bool auth_flag = false, ping_flag = false;
 bool touch_flag = false, fsr_flag = false;
 bool action_flag = false;
+
+// === Touch Sensor Action 판별용 변수 ===
+enum TouchState
+{
+    IDLE,
+    TOUCHING,
+    WAITING_FOR_SECOND_TOUCH,
+    COOLDOWN
+};
+TouchState touchState = IDLE;
+unsigned long touchStartTime = 0;
+unsigned long lastTouchTime = 0;
+unsigned long cooldownStartTime = 0;
+bool firstTouchDetected = false;
+const unsigned long doubleTouchGap = 250;
+const unsigned long longTouchThreshold = 4000;
+const unsigned long cooldownDuration = 200;
+
+// === FSR Sensor 평균값 계산 변수 ===
+const int FSR_COUNT = 60;
+int fsrValues[FSR_COUNT] = {0}; // 최근 60개 저장
+int fsrIndex = 0;
+bool filled = false;
 
 void setup()
 {
@@ -80,6 +107,67 @@ void setup()
 
 void loop()
 {
+    static int touchAction = 0;
+
+    if (touch_flag)
+    {
+        bool isTouched = digitalRead(TOUCH_PIN) == HIGH;
+        unsigned long now = millis();
+
+        switch (touchState)
+        {
+            case IDLE:
+                if (touch_flag && isTouched)
+                {
+                    touchStartTime = now;
+                    touchState = TOUCHING;
+                }
+                break;
+
+            case TOUCHING:
+                if (!isTouched)
+                {
+                    unsigned long duration = now - touchStartTime;
+                    if (duration >= longTouchThreshold)
+                    {
+                        touchAction = 3;  // Long touch
+                        touchState = COOLDOWN; // 💡 쿨다운 진입
+                        cooldownStartTime = now;
+                    }
+                    else
+                    {
+                        lastTouchTime = now;
+                        firstTouchDetected = true;
+                        touchState = WAITING_FOR_SECOND_TOUCH;
+                    }
+                }
+                break;
+
+            case WAITING_FOR_SECOND_TOUCH:
+                if (isTouched && (now - lastTouchTime <= doubleTouchGap))
+                {
+                    touchAction = 2; // Double touch
+                    touchState = COOLDOWN;
+                    cooldownStartTime = now;
+                    firstTouchDetected = false;
+                }
+                else if (!isTouched && (now - lastTouchTime > doubleTouchGap))
+                {
+                    touchAction = 1; // Single short touch
+                    touchState = COOLDOWN;
+                    cooldownStartTime = now;
+                    firstTouchDetected = false;
+                }
+                break;
+            case COOLDOWN:
+                if (now - cooldownStartTime > cooldownDuration)
+                {
+                    touchState = IDLE;
+                }
+                break;
+        }
+    }
+
     if (client.connected() && (millis() - lastClientSend >= 1000))
     {
         ping_flag = true;
@@ -88,117 +176,75 @@ void loop()
         {
             if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial())
             {
-                // UID를 문자열로 변환
-                UID = "";
+                // 태그한 UID를 문자열로 변환
+                String tagUID = "";
                 for (byte i = 0; i < rfid.uid.size; i++)
                 {
-                    UID += String(rfid.uid.uidByte[i]);
+                    tagUID += String(rfid.uid.uidByte[i]);
                     if (i < rfid.uid.size - 1)
-                        UID += " ";
+                        tagUID += " ";
                 }
 
                 // 카드 통신 종료
                 rfid.PICC_HaltA();
                 rfid.PCD_StopCrypto1();
 
-                delay(1000); // 중복 인식 방지
-            }
-
-            // 현재 시간 구조체로 가져오기
-            time_t now = time(nullptr);
-            struct tm *timeinfo = localtime(&now);
-            // ISO8601 문자열로 포맷팅
-            char timestamp[25];
-            strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", timeinfo);
-
-            String message = "{";
-            message += "\"event\":\"rfid\",";
-            message += "\"did\":\"" + String(DESK_ID) + "\",";
-            message += "\"uid\":\"" + UID + "\",";
-            message += "\"value\":0,";
-            message += "\"timestamp\":\"" + String(timestamp) + "\"";
-            message += "}";
-            client.write((message + "\n").c_str());
-            Serial.println("Sent to server: " + message);
-            ping_flag = false;
-
-            if (UID == "147 148 214 5")
-            {
-                auth_flag = true;
-                touch_flag = true;
-                fsr_flag = true;
-            }
-        }
-        if (touch_flag)
-        {
-            int touchState = digitalRead(TOUCH_PIN);
-
-            if (touchState)
-            {
-                // 현재 시간 구조체로 가져오기
-                time_t now = time(nullptr);
-                struct tm *timeinfo = localtime(&now);
-                // ISO8601 문자열로 포맷팅
-                char timestamp[25];
-                strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", timeinfo);
-
-                String message = "{";
-                message += "\"event\":\"touch\",";
-                message += "\"did\":\"" + String(DESK_ID) + "\",";
-                message += "\"uid\":\"" + UID + "\",";
-                message += "\"value\":" + String(touchState) + ",";
-                message += "\"timestamp\":\"" + String(timestamp) + "\"";
-                message += "}";
-                client.write((message + "\n").c_str());
-                Serial.println("Sent to server: " + message);
+                sendToTcpServer("rfid", tagUID);
                 ping_flag = false;
+                
+                delay(500); // 중복 인식 방지
             }
         }
+
+        if (touch_flag && touchAction > 0)
+        {
+            if (touchAction == 3)
+            {
+                auth_flag = false;
+                touch_flag = false;
+                fsr_flag = false;
+                UID = "";
+                Serial.println("Goodbye Authorized User");
+            }
+            sendToTcpServer("touch", String(touchAction));
+            touchAction = 0;
+            ping_flag = false;
+        }
+
         if (fsr_flag)
         {
+            static int sum = 0;
+            static int average = 0;
+
             int fsrValue = analogRead(FSR_PIN); // 0 ~ 1023
+
+            sum -= fsrValues[fsrIndex];
+            fsrValues[fsrIndex] = fsrValue;
+            sum += fsrValues[fsrIndex];
+
+            fsrIndex = (fsrIndex + 1) % FSR_COUNT;
+            if (fsrIndex == 0) filled = true;
+        
+            // 평균 계산
+            int count = filled ? FSR_COUNT : fsrIndex;        
+            average = sum / count;
+            Serial.print("FSR average (");
+            Serial.print(fsrIndex);
+            Serial.print("): ");
+            Serial.println(average);
 
             if (fsrValue > 700)
             {
-                // 현재 시간 구조체로 가져오기
-                time_t now = time(nullptr);
-                struct tm *timeinfo = localtime(&now);
-                // ISO8601 문자열로 포맷팅
-                char timestamp[25];
-                strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", timeinfo);
-
-                String message = "{";
-                message += "\"event\":\"fsr\",";
-                message += "\"did\":\"" + String(DESK_ID) + "\",";
-                message += "\"uid\":\"" + UID + "\",";
-                message += "\"value\":" + String(fsrValue) + ",";
-                message += "\"timestamp\":\"" + String(timestamp) + "\"";
-                message += "}";
-                client.write((message + "\n").c_str());
-                Serial.println("Sent to server: " + message);
+                sendToTcpServer("touch", String(fsrValue));
                 ping_flag = false;
             }
         }
+
         if (ping_flag)
         {
-            // 현재 시간 구조체로 가져오기
-            time_t now = time(nullptr);
-            struct tm *timeinfo = localtime(&now);
-            // ISO8601 문자열로 포맷팅
-            char timestamp[25];
-            strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", timeinfo);
-
-            String message = "{";
-            message += "\"event\":\"ping\",";
-            message += "\"did\":\"" + String(DESK_ID) + "\",";
-            message += "\"uid\":\"" + UID + "\",";
-            message += "\"value\":0,";
-            message += "\"timestamp\":\"" + String(timestamp) + "\"";
-            message += "}";
-            client.write((message + "\n").c_str());
-            Serial.println("Sent to server: " + message);
+            sendToTcpServer("ping");
         }
-        
+
         lastClientSend = millis();
     }
 }
@@ -213,6 +259,49 @@ void handleClientConnect(void *arg, AsyncClient *c)
 void handleClientData(void *arg, AsyncClient *c, void *data, size_t len)
 {
     Serial.printf("Data from server: %.*s\n", len, (char *)data);
+
+    String jsonStr = String((char *)data).substring(0, len);
+    jsonStr.trim();  // 개행 문자 제거
+
+    StaticJsonDocument<512> doc;  // 필요한 크기 조정 가능
+    DeserializationError error = deserializeJson(doc, jsonStr);
+
+    if (error)
+    {
+        Serial.print("JSON 파싱 실패: ");
+        Serial.println(error.c_str());
+        return;
+    }
+
+    // 필드 추출
+    String event = doc["event"];
+    String did = doc["did"];
+    String uid = doc["uid"];
+    int value = doc["value"];
+    String timestamp = doc["timestamp"];
+
+    // 사용 예시
+    Serial.print("event: " + event);
+    Serial.print("\tdid: " + did);
+    Serial.print("\tuid: " + uid);
+    Serial.print("\tvalue: " + String(value));
+    Serial.println("\ttimestamp: " + timestamp);
+
+    if (event == "rfid")
+    {
+        if (value)
+        {
+            auth_flag = true;
+            touch_flag = true;
+            fsr_flag = true;
+            UID = uid;
+            Serial.println("Welcome Authorized User");
+        }
+        else
+        {
+            Serial.println("Bye Unauthorized User");
+        }
+    }
 }
 
 // 클라이언트 연결 해제 콜백
@@ -221,4 +310,29 @@ void handleClientDisconnect(void *arg, AsyncClient *c)
     Serial.println("Disconnected from server");
     // 재연결 시도
     client.connect(remoteHost, remotePort);
+}
+
+String getCurrentTime()
+{
+    // 현재 시간 구조체로 가져오기
+    time_t now = time(nullptr);
+    struct tm *timeinfo = localtime(&now);
+    // ISO8601 문자열로 포맷팅
+    char timestamp[25];
+    strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", timeinfo);
+
+    return String(timestamp);
+}
+
+void sendToTcpServer(String event, String value)
+{
+    String message = "{";
+    message += "\"event\":\"" + event + "\",";
+    message += "\"did\":\"" + String(DESK_ID) + "\",";
+    message += "\"uid\":\"" + (event == "rfid" ? value : UID) + "\",";
+    message += "\"value\":" + (event == "rfid" ? "0" : value) + ",";
+    message += "\"timestamp\":\"" + getCurrentTime() + "\"";
+    message += "}";
+    client.write((message + "\n").c_str());
+    Serial.println("Sent to server: " + message);
 }
