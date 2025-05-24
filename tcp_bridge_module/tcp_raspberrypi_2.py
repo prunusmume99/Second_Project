@@ -92,20 +92,26 @@ def handle_client(client_socket):
                     print(f"{datetime.datetime.now()}: Received {event} from {did} - UID: {uid}, JSON: {line.decode()}")
 
                     if event == "ping":
-                        pass
+                        client_socket.send(("ping\n").encode())
+                        print(f" → Sent to {did}: ping")
 
                     elif event == "rfid" and did and uid:
                         is_auth = check_auth(did, uid)
-                        response_event = "Auth" if is_auth else "Block"
+                        response_value = 1 if is_auth else 0
 
-                        # resp = {
-                        #     "event": response_event,
-                        #     "did": did,
-                        #     "uid": uid,
-                        #     "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        # }
-                        client_socket.send((response_event + "\n").encode())
-                        print(f" → Sent to {did}: {response_event}")
+                        resp = {
+                            "event": event,
+                            "did": did,
+                            "uid": uid,
+                            "value": response_value,
+                            "timestamp": timestamp
+                        }
+                        client_socket.send((json.dumps(resp) + "\n").encode())
+                        print(f" → Sent to {did}: {json.dumps(resp)}")
+
+                    else:
+                        client_socket.send((line + "\n").encode())
+                        print(f" → Sent to {did}: {line}")
 
                     # 모든 이벤트에 대해 ZMQ로 중계
                     zmq_socket.send_string(f"{did}: {json.dumps(parsed)}")
