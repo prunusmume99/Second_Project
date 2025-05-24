@@ -3,7 +3,7 @@ import selectors
 import zmq
 import datetime
 import json
-import sqlite3  # 또는 원하는 DB
+import pymysql  # 또는 원하는 DB
 
 HOST = '0.0.0.0'
 PORT = 8080
@@ -35,11 +35,19 @@ def accept_connection(server_socket):
     print(f"{datetime.datetime.now()}: New connection from {addr}")
 
 def check_auth(did, uid):
-    """데이터베이스에서 did, uid 일치 여부 확인"""
+    # 데이터베이스에서 did, uid 일치 여부 확인
     try:
-        conn = sqlite3.connect('access.db')
+        conn = pymysql.connect(
+            host = "192.168.0.60",
+            user = "root",
+            password = "djwls123",
+            database = "study_db.db"
+        )
         cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM authorized_users WHERE did=? AND uid=?", (did, uid))
+        cur.execute(
+            "SELECT COUNT(*) FROM `user` WHERE Desk_Num=%s AND Card_Num=%s",
+            (did, uid)
+        )
         count = cur.fetchone()[0]
         conn.close()
         return count > 0
