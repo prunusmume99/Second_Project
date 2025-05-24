@@ -10,7 +10,7 @@ PORT = 8080
 
 # ─── 변경: Actuator ESP 서버 정보 추가 ───────────────────────
 # 2번째 코드에는 없던, actuator로 메시지를 포워딩할 대상
-ACTUATOR_IP   = '192.168.0.87'
+ACTUATOR_IP = '192.168.0.87'
 ACTUATOR_PORT = 9090
 
 # ─── ZeroMQ IPC 엔드포인트 (기존과 동일) ────────────────────
@@ -22,7 +22,7 @@ ZMQ_IPC = 'ipc:///tmp/esp_data'
 clients = {}  # { sock: { 'addr': (ip,port), 'buffer': bytes } }
 
 # ─── ZeroMQ PUB 설정 (기존과 동일) ─────────────────────────
-context    = zmq.Context()
+context = zmq.Context()
 zmq_socket = context.socket(zmq.PUB)
 zmq_socket.bind(ZMQ_IPC)
 
