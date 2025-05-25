@@ -269,7 +269,7 @@ void loop()
 
             if (action_flag)
             {
-                if (fsrAverage < 20)    // 휴식 시간 측정으로 전환
+                if (fsrAverage < 30)    // 휴식 시간 측정으로 전환
                 {
                     action_flag = false;
                     sendToTcpServer("action", "0");
