@@ -21,8 +21,8 @@ PORTS = {
 
 # ─── 변경: Actuator ESP 서버 정보 추가 ───────────────────────
 # 2번째 코드에는 없던, actuator로 메시지를 포워딩할 대상
-ACTUATOR_IP = '192.168.0.87'
-ACTUATOR_PORT = 9090
+# ACTUATOR_IP = '192.168.0.87'
+ACTUATOR_PORT = 9090 # 기본 포트로 유지, 그러나 유동 포트로 확장 가능
 
 ZMQ_IPC = 'ipc:///tmp/esp_data'  # ZeroMQ IPC 엔드포인트
 
@@ -91,13 +91,29 @@ def check_auth(did, uid):
         print(f"DB Error: {e}")
         return False
 
-def forward_to_actuator(msg: str):
+def forward_to_actuator(parsed: dict):
+    actu_ip = parsed.get("actuIP")
+    port = ACTUATOR_PORT  # 필요 시 parsed.get("actuPort")로 확장 가능
+
+    if not actu_ip:
+        print("⚠️ No actuIP in message")
+        return
+
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.connect((ACTUATOR_IP, ACTUATOR_PORT))
-            s.sendall((msg + "\n").encode())
+            s.connect((actu_ip, port))
+            s.sendall((json.dumps(parsed) + "\n").encode())
+            print(f"✅ Forwarded to actuator at {actu_ip}:{port}")
     except Exception as e:
-        print(f"{datetime.datetime.now()}: [Error] Forward to Actuator failed: {e}")
+        print(f"❌ Failed to send to actuator {actu_ip}:{port} → {e}")
+
+# def forward_to_actuator(msg: str):
+#     try:
+#         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+#             s.connect((ACTUATOR_IP, ACTUATOR_PORT))
+#             s.sendall((msg + "\n").encode())
+#     except Exception as e:
+#         print(f"{datetime.datetime.now()}: [Error] Forward to Actuator failed: {e}")
 
 def handle_actuator_proxy(client_sock):
     addr = clients[client_sock]['addr']
@@ -144,7 +160,6 @@ def handle_sensor_input(client_socket):
         recv_data = client_socket.recv(1024)
         if recv_data:
             clients[client_socket]['buffer'] += recv_data
-            # 줄바꿈(\n)으로 메시지 완성 여부 확인
             while b'\n' in clients[client_socket]['buffer']:
                 line, _, clients[client_socket]['buffer'] = clients[client_socket]['buffer'].partition(b'\n')
                 try:
@@ -154,6 +169,7 @@ def handle_sensor_input(client_socket):
                     uid = parsed.get("uid")
                     value = parsed.get("value")
                     timestamp = parsed.get("timestamp")
+                    actuIP = parsed.get("actuIP", "")
 
                     # 최초 id 저장
                     if clients[client_socket].get('id', 'Unknown') == 'Unknown' and did:
@@ -163,32 +179,36 @@ def handle_sensor_input(client_socket):
                     print(f"{datetime.datetime.now()}: Received {event} from {did} - UID: {uid}, JSON: {line.decode()}")
 
                     if event == "ping":
+                        print(f"📡 Received ping from {did}")
                         pass
 
                     elif event == "rfid" and did and uid:
                         is_auth = check_auth(did, uid)
-                        response_event = "Auth" if is_auth else "Block"
+                        resp = {
+                            "event": "rfid",
+                            "did": did,
+                            "uid": uid,
+                            "value": 1 if is_auth else 0,
+                            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "actuIP": actuIP
+                        }
+                        client_socket.send((json.dumps(resp) + "\n").encode())
+                        print(f" → Sent to {did}: {'Auth' if is_auth else 'Block'}")
 
-                        # resp = {
-                        #     "event": response_event,
-                        #     "did": did,
-                        #     "uid": uid,
-                        #     "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        # }
-                        client_socket.send((response_event + "\n").encode())
-                        print(f" → Sent to {did}: {response_event}")
+                    elif event in ("touch", "action"):
+                        forward_to_actuator(parsed)
 
-                    # 모든 이벤트에 대해 ZMQ로 중계
+                    # 모든 이벤트 ZMQ 전송
                     zmq_socket.send_string(f"{did}: {json.dumps(parsed)}")
 
                 except json.JSONDecodeError as e:
                     print(f"❌ JSON Parse Error: {e}, Raw: {line}")
         else:
-            # 클라이언트 연결 종료
             close_sensor_connection(client_socket)
     except Exception as e:
         print(f"{datetime.datetime.now()}: Error with {clients[client_socket]['id']} ({addr}): {e}")
         close_sensor_connection(client_socket)
+
 
 def close_sensor_connection(client_socket):
     addr = clients[client_socket]['addr']
