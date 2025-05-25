@@ -39,6 +39,7 @@ sel = selectors.DefaultSelector()
 poller = zmq.Poller()
 poller.register(zmq_socket, zmq.POLLIN)
 
+
 def setup_server():
     for role, port in PORTS.items():
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -91,8 +92,14 @@ def check_auth(did, uid):
         print(f"DB Error: {e}")
         return False
 
+
 def forward_to_actuator(parsed: dict):
     actu_ip = parsed.get("actuIP")
+
+    if not actu_ip:
+        print("⚠️ No actuIP in parsed message")
+        return
+
     port = ACTUATOR_PORT  # 필요 시 parsed.get("actuPort")로 확장 가능
 
     if not actu_ip:
@@ -154,6 +161,137 @@ def handle_actuator_proxy(client_sock):
         print(f"{datetime.datetime.now()}: Error with {addr}: {e}")
         close_actuator_connection(client_sock)
 
+
+def get_study_start_time(uid, actuIP):
+    try:
+        conn = pymysql.connect(
+            host="localhost",
+            user="root",
+            password="djwls123",
+            database="study_db"
+        )
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT Start_Time FROM Record_Table 
+                WHERE Card_Num=%s AND End_Time IS NULL 
+                ORDER BY Log_ID DESC LIMIT 1
+            """, (uid,))
+            row = cur.fetchone()
+            start_time = row[0].strftime("%H:%M") if row else "N/A"
+
+        return {
+            "event": "lcd",
+            "uid": uid,
+            "mode": 0,
+            "data": start_time,
+            "actuIP": actuIP
+        }
+    
+    except Exception as e:
+        print(f"Error: {e}")
+        return {"event": "lcd", "uid": uid, "mode": 0, "data": f"Error: {str(e)}", "actuIP": actuIP}
+
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
+
+def get_today_study_summary(uid, actuIP):
+    try:
+        conn = pymysql.connect(
+            host="localhost",
+            user="root",
+            password="djwls123",
+            database="study_db"
+        )
+        with conn.cursor() as cur:
+            # 공부 시간 합산
+            cur.execute("""
+                SELECT SUM(TIMESTAMPDIFF(MINUTE, Start_Time, IFNULL(End_Time, NOW())))
+                FROM Record_Table
+                WHERE Card_Num=%s AND DATE(Start_Time) = CURDATE() AND Status=1
+            """, (uid,))
+            study_time = cur.fetchone()[0] or 0
+
+            # 휴식 시간 합산
+            cur.execute("""
+                SELECT SUM(TIMESTAMPDIFF(MINUTE, Start_Time, IFNULL(End_Time, NOW())))
+                FROM Record_Table
+                WHERE Card_Num=%s AND DATE(Start_Time) = CURDATE() AND Status=0
+            """, (uid,))
+            rest_time = cur.fetchone()[0] or 0
+
+        return {
+            "event": "lcd",
+            "uid": uid,
+            "mode": 1,
+            "data": f"공부:{study_time}분, 휴식:{rest_time}분",
+            "actuIP": actuIP
+        }
+
+    except Exception as e:
+        print(f"Error: {e}")
+        return {"event": "lcd", "uid": uid, "mode": 1, "data": f"Error: {str(e)}", "actuIP": actuIP}
+
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
+
+def get_monthly_average_summary(uid, actuIP):
+    try:
+        conn = pymysql.connect(
+            host="localhost",
+            user="root",
+            password="djwls123",
+            database="study_db"
+        )
+        with conn.cursor() as cur:
+            # 공부 시간: 최근 30일
+            cur.execute("""
+                SELECT DATE(Start_Time), SUM(TIMESTAMPDIFF(MINUTE, Start_Time, IFNULL(End_Time, NOW())))
+                FROM Record_Table
+                WHERE Card_Num=%s
+                  AND Start_Time >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+                  AND Status=1
+                GROUP BY DATE(Start_Time)
+            """, (uid,))
+            study_rows = cur.fetchall()
+            total_study = sum(row[1] for row in study_rows if row[1])
+            study_days = len(study_rows)
+            avg_study = total_study // study_days if study_days else 0
+
+            # 휴식 시간: 최근 30일
+            cur.execute("""
+                SELECT DATE(Start_Time), SUM(TIMESTAMPDIFF(MINUTE, Start_Time, IFNULL(End_Time, NOW())))
+                FROM Record_Table
+                WHERE Card_Num=%s
+                  AND Start_Time >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+                  AND Status=0
+                GROUP BY DATE(Start_Time)
+            """, (uid,))
+            rest_rows = cur.fetchall()
+            total_rest = sum(row[1] for row in rest_rows if row[1])
+            rest_days = len(rest_rows)
+            avg_rest = total_rest // rest_days if rest_days else 0
+
+        return {
+            "event": "lcd",
+            "uid": uid,
+            "mode": 2,
+            "data": f"공부:{avg_study}분, 휴식:{avg_rest}분",
+            "actuIP": actuIP
+        }
+
+    except Exception as e:
+        print(f"Error: {e}")
+        return {"event": "lcd", "uid": uid, "mode": 2, "data": f"Error: {str(e)}", "actuIP": actuIP}
+
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
+
 def handle_sensor_input(client_socket):
     addr = clients[client_socket]['addr']
     try:
@@ -196,7 +334,31 @@ def handle_sensor_input(client_socket):
                         print(f" → Sent to {did}: {'Auth' if is_auth else 'Block'}")
 
                     elif event == "touch":
-                        forward_to_actuator(parsed)
+                        value = int(parsed.get("value", 0))
+                        if 2 <= value <= 3:
+                            # actuator로 그대로 포워딩
+                            forward_to_actuator(parsed)
+
+                        elif 10 <= value <= 12:
+                            mode = value % 10
+
+                            if mode == 0:
+                                # 현재 학습 시간 시작 조회
+                                resp = get_study_start_time(uid, actuIP)
+
+                            elif mode == 1:
+                                # 오늘의 총 공부 및 휴식 시간 조회
+                                resp = get_today_study_summary(uid, actuIP)
+
+                            elif mode == 2:
+                                # 30일간 평균 학습/휴식 시간 조회
+                                resp = get_monthly_average_summary(uid, actuIP)
+
+                            # 응답은 actuator로 포워딩 (LCD 출력용)
+                            forward_to_actuator(resp)
+
+                    # elif event == "touch":
+                    #     forward_to_actuator(parsed)
 
                     elif event == "action" and uid:
                         # actuator 에 먼저 포워딩
@@ -277,12 +439,14 @@ def close_sensor_connection(client_socket):
     client_socket.close()
     del clients[client_socket]
 
+
 def close_actuator_connection(client_sock):
     addr = clients[client_sock]['addr']
     print(f"{datetime.datetime.now()}: Connection closed for {addr}")
     sel.unregister(client_sock)
     client_sock.close()
     del clients[client_sock]
+
 
 def main():
     server_socket = setup_server()
@@ -301,6 +465,7 @@ def main():
         for key, mask in selector_events:
             callback = key.data
             callback(key.fileobj)
+
 
 if __name__ == "__main__":
     try:
