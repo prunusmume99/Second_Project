@@ -89,8 +89,11 @@ def handle_client(client_socket):
                     if clients[client_socket].get('id', 'Unknown') == 'Unknown' and did:
                         clients[client_socket]['id'] = did
                         print(f"🎯 Client {addr} identified as {did}")
-
-                    print(f"{datetime.datetime.now()}: Received {event} from {did} - UID: {uid}, JSON: {line.decode()}")
+                    
+                    if event == "ping":
+                        print(".", end="")
+                    else:
+                        print(f"{datetime.datetime.now()}: Received {event} from {did} - UID: {uid}, JSON: {line.decode()}")
 
                     if event == "rfid" and did and uid:
                         is_auth = check_auth(did, uid)
@@ -106,10 +109,9 @@ def handle_client(client_socket):
                         }
                         client_socket.send((json.dumps(resp) + "\n").encode())
                         print(f" → Sent to {did}: {json.dumps(resp)}")
-
                     else:
                         client_socket.send(line)
-                        print(f" → Sent to {did}: {line.decode()}")
+                        print("→", end="")
 
                     # 모든 이벤트에 대해 ZMQ로 중계
                     zmq_socket.send_string(f"{did}: {json.dumps(parsed)}")
