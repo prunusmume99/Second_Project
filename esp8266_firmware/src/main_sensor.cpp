@@ -19,9 +19,10 @@
 MFRC522 rfid(SS_PIN, RST_PIN);
 
 // Wi-Fi 설정
-const char *ssid = "turtle";         // Wi-Fi SSID
-const char *password = "turtlebot3"; // Wi-Fi 비밀번호
-const char *DESK_ID = "DESK01";      // 고유한 클라이언트 ID (예: DESK01, DESK02)
+const char *ssid = "turtle";                // Wi-Fi SSID
+const char *password = "turtlebot3";        // Wi-Fi 비밀번호
+const char *DESK_ID = "DESK01";             // 고유한 클라이언트 ID (예: DESK01, DESK02)
+const char *ACTUATOR_IP = "192.168.0.87";   // 페어링되는 액츄에이터의 IP
 String UID = "";
 
 // TCP 클라이언트 설정
@@ -58,6 +59,8 @@ bool firstTouchDetected = false;
 const unsigned long doubleTouchGap = 250;
 const unsigned long longTouchThreshold = 4000;
 const unsigned long cooldownDuration = 200;
+const int LCD_MODE_COUNT = 3;
+int lcd_mode = 0;   // 0 : 현재 측정 중인 시간, 1 : 하루동안 측정된 총 시간, 2 : 월간 평균 패턴
 
 // === FSR Sensor 평균값 계산 변수 ===
 const int FSR_COUNT = 60;
@@ -204,7 +207,9 @@ void loop()
             {
                 if (record_flag)
                 {
-                    sendToTcpServer("touch", String(touchAction));
+                    lcd_mode = (lcd_mode + 1) % LCD_MODE_COUNT;
+                    int touchValue = 10 + lcd_mode;
+                    sendToTcpServer("touch", String(touchValue));
                     ping_flag = false;
                 }
             }
@@ -231,6 +236,7 @@ void loop()
                 fsr_flag = false;
                 record_flag = false;
                 action_flag = false;
+                lcd_mode = 0;
                 
                 sendToTcpServer("touch", String(touchAction));
                 ping_flag = false;
@@ -242,7 +248,7 @@ void loop()
             touchAction = 0;
         }
 
-        if (fsr_flag)
+        if (fsr_flag && record_flag)
         {
             int fsrValue = analogRead(FSR_PIN); // 0 ~ 1023
 
@@ -266,7 +272,7 @@ void loop()
                 if (fsrAverage < 20)    // 휴식 시간 측정으로 전환
                 {
                     action_flag = false;
-                    sendToTcpServer("touch", "0");
+                    sendToTcpServer("action", "0");
                     ping_flag = false;
                 }
             }
@@ -275,7 +281,7 @@ void loop()
                 if (fsrAverage > 300)   // 공부 시간 측정으로 전환
                 {
                     action_flag = true;
-                    sendToTcpServer("touch", "1");
+                    sendToTcpServer("action", "1");
                     ping_flag = false;
                 }
             }
@@ -316,6 +322,7 @@ void handleClientData(void *arg, AsyncClient *c, void *data, size_t len)
 
     // 필드 추출
     String event = resp["event"];
+    String actuIP = resp["actuIP"];
     String did = resp["did"];
     String uid = resp["uid"];
     int value = resp["value"];
@@ -323,6 +330,7 @@ void handleClientData(void *arg, AsyncClient *c, void *data, size_t len)
 
     // 사용 예시
     Serial.print("event: " + event);
+    Serial.print("\tactuIP: " + actuIP);
     Serial.print("\tdid: " + did);
     Serial.print("\tuid: " + uid);
     Serial.print("\tvalue: " + String(value));
@@ -368,6 +376,7 @@ void sendToTcpServer(String event, String value)
 {
     String message = "{";
     message += "\"event\":\"" + event + "\",";
+    message += "\"actuIP\":\"" + String(ACTUATOR_IP) + "\",";
     message += "\"did\":\"" + String(DESK_ID) + "\",";
     message += "\"uid\":\"" + (event == "rfid" ? value : UID) + "\",";
     message += "\"value\":" + (event == "rfid" ? "0" : value) + ",";
