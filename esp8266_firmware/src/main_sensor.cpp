@@ -40,7 +40,7 @@ void sendToTcpServer(String event, String value = String(0));
 // === Sensor Flag 초기화 ===
 bool auth_flag = false, ping_flag = false;
 bool touch_flag = false, fsr_flag = false;
-bool action_flag = false;
+bool record_flag = false, action_flag = false;
 
 // === Touch Sensor Action 판별용 변수 ===
 enum TouchState
@@ -108,6 +108,8 @@ void setup()
 void loop()
 {
     static int touchAction = 0;
+    static int fsrSum = 0;
+    static int fsrAverage = 0;
 
     if (touch_flag)
     {
@@ -198,45 +200,84 @@ void loop()
 
         if (touch_flag && touchAction > 0)
         {
-            if (touchAction == 3)
+            if (touchAction == 1)       // LCD 출력 모드 변경
+            {
+                if (record_flag)
+                {
+                    sendToTcpServer("touch", String(touchAction));
+                    ping_flag = false;
+                }
+            }
+            else if (touchAction == 2)  // 공부 루틴 기록 시작
+            {
+                if (!fsr_flag)
+                {
+                    record_flag = true;
+                    fsr_flag = true;
+                    memset(fsrValues, 0, sizeof(fsrValues));
+                    fsrIndex = 0;
+                    filled = false;
+                    fsrSum = 0;
+                    fsrAverage = 0;
+
+                    sendToTcpServer("touch", String(touchAction));
+                    ping_flag = false;
+                }
+            }
+            else if (touchAction == 3)  // 전체 종료
             {
                 auth_flag = false;
                 touch_flag = false;
                 fsr_flag = false;
+                record_flag = false;
+                action_flag = false;
+                
+                sendToTcpServer("touch", String(touchAction));
+                ping_flag = false;
+                
                 UID = "";
-                Serial.println("Goodbye Authorized User");
+                Serial.println("Goodbye My User");
             }
-            sendToTcpServer("touch", String(touchAction));
+
             touchAction = 0;
-            ping_flag = false;
         }
 
         if (fsr_flag)
         {
-            static int sum = 0;
-            static int average = 0;
-
             int fsrValue = analogRead(FSR_PIN); // 0 ~ 1023
 
-            sum -= fsrValues[fsrIndex];
+            fsrSum -= fsrValues[fsrIndex];
             fsrValues[fsrIndex] = fsrValue;
-            sum += fsrValues[fsrIndex];
+            fsrSum += fsrValues[fsrIndex];
 
             fsrIndex = (fsrIndex + 1) % FSR_COUNT;
             if (fsrIndex == 0) filled = true;
         
             // 평균 계산
             int count = filled ? FSR_COUNT : fsrIndex;        
-            average = sum / count;
+            fsrAverage = fsrSum / count;
             Serial.print("FSR average (");
             Serial.print(fsrIndex);
             Serial.print("): ");
-            Serial.println(average);
+            Serial.println(fsrAverage);
 
-            if (fsrValue > 700)
+            if (action_flag)
             {
-                sendToTcpServer("touch", String(fsrValue));
-                ping_flag = false;
+                if (fsrAverage < 20)    // 휴식 시간 측정으로 전환
+                {
+                    action_flag = false;
+                    sendToTcpServer("touch", "0");
+                    ping_flag = false;
+                }
+            }
+            else
+            {
+                if (fsrAverage > 300)   // 공부 시간 측정으로 전환
+                {
+                    action_flag = true;
+                    sendToTcpServer("touch", "1");
+                    ping_flag = false;
+                }
             }
         }
 
@@ -263,8 +304,8 @@ void handleClientData(void *arg, AsyncClient *c, void *data, size_t len)
     String jsonStr = String((char *)data).substring(0, len);
     jsonStr.trim();  // 개행 문자 제거
 
-    StaticJsonDocument<512> doc;  // 필요한 크기 조정 가능
-    DeserializationError error = deserializeJson(doc, jsonStr);
+    StaticJsonDocument<512> resp;  // 필요한 크기 조정 가능
+    DeserializationError error = deserializeJson(resp, jsonStr);
 
     if (error)
     {
@@ -274,11 +315,11 @@ void handleClientData(void *arg, AsyncClient *c, void *data, size_t len)
     }
 
     // 필드 추출
-    String event = doc["event"];
-    String did = doc["did"];
-    String uid = doc["uid"];
-    int value = doc["value"];
-    String timestamp = doc["timestamp"];
+    String event = resp["event"];
+    String did = resp["did"];
+    String uid = resp["uid"];
+    int value = resp["value"];
+    String timestamp = resp["timestamp"];
 
     // 사용 예시
     Serial.print("event: " + event);
@@ -293,13 +334,12 @@ void handleClientData(void *arg, AsyncClient *c, void *data, size_t len)
         {
             auth_flag = true;
             touch_flag = true;
-            fsr_flag = true;
             UID = uid;
-            Serial.println("Welcome Authorized User");
+            Serial.println("Welcome My User");
         }
         else
         {
-            Serial.println("Bye Unauthorized User");
+            Serial.println("Please Don't Tag");
         }
     }
 }
