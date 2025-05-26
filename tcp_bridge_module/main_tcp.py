@@ -216,13 +216,13 @@ def execute_recording(code: int, uid: str, timestamp: str):
         with conn.cursor() as cur:
             conn.begin()    # 트랜잭션 시작 (자동 커밋 끄기)
             cur.execute("""
-                UPDATE Record_Table SET End_Time = %s, Amount = TIMESTAMPDIFF(MINUTE, Start_Time, %s)
+                UPDATE Recd_Table SET End_Time = %s, Amount = TIMESTAMPDIFF(MINUTE, Start_Time, %s)
                 WHERE Card_Num = %s AND End_Time IS NULL
                 """, (timestamp, timestamp, uid))
             cur.execute("""
-                INSERT INTO Record_Table (Card_Num, Status, Start_Time)
-                VALUES (%s, %d, %s);
-                """, (uid, code, timestamp, ))
+                INSERT INTO Recd_Table (Card_Num, Status, Start_Time)
+                VALUES (%s, %s, %s)
+                """, (uid, code, timestamp,))
         conn.commit()       # 완료 커밋
         return True
     except Exception as e:
@@ -246,7 +246,7 @@ def execute_finish(uid: str, timestamp: str):
         with conn.cursor() as cur:
             conn.begin()    # 트랜잭션 시작 (자동 커밋 끄기)
             cur.execute("""
-                UPDATE Record_Table SET End_Time = %s, Amount = TIMESTAMPDIFF(MINUTE, Start_Time, %s)
+                UPDATE Recd_Table SET End_Time = %s, Amount = TIMESTAMPDIFF(MINUTE, Start_Time, %s)
                 WHERE Card_Num = %s AND End_Time IS NULL
                 """, (timestamp, timestamp, uid))
         conn.commit()       # 완료 커밋
@@ -275,7 +275,7 @@ def get_statistics(code: int, uid: str) -> str:
                 SELECT
                     SUM(CASE WHEN Status = 1 THEN Amount ELSE 0 END) AS total_study_minutes,
                     SUM(CASE WHEN Status = 0 THEN Amount ELSE 0 END) AS total_break_minutes
-                FROM Record_Table
+                FROM Recd_Table
                 WHERE Start_Time >= CURDATE() AND Card_Num = %s
                 """, (uid,))
                 row = cur.fetchone()
@@ -286,7 +286,7 @@ def get_statistics(code: int, uid: str) -> str:
                 SELECT
                     FLOOR(AVG(CASE WHEN Status = 1 THEN Amount END)) AS avg_study_minutes,
                     FLOOR(AVG(CASE WHEN Status = 0 THEN Amount END)) AS avg_break_minutes
-                FROM Record_Table
+                FROM Recd_Table
                 WHERE Start_Time >= (CURDATE() - INTERVAL 1 MONTH) AND Start_Time < CURDATE()
                 AND Card_Num = %s
                 """, (uid,))
